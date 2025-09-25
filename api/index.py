@@ -15,9 +15,13 @@ def calculate_percentile(data, percentile):
         lower_index = int(index)
         upper_index = lower_index + 1
         fraction = index - lower_index
-        return sorted_data[lower_index] + (sorted_data[upper_index] - sorted_data[lower_index]) * fraction
+        # Ensure upper_index is not out of bounds
+        if upper_index < size:
+            return sorted_data[lower_index] + (sorted_data[upper_index] - sorted_data[lower_index]) * fraction
+        else:
+            return sorted_data[lower_index]
 
-# --- The JSON data is embedded directly in the code ---
+# --- The JSON data is now embedded directly in the code ---
 telemetry_data = [
     {"region":"apac","service":"analytics","latency_ms":225.55,"uptime_pct":98.427,"timestamp":20250301},
     {"region":"apac","service":"analytics","latency_ms":197.32,"uptime_pct":99.212,"timestamp":20250302},
@@ -62,53 +66,60 @@ class handler(BaseHTTPRequestHandler):
         # This handles the pre-flight request for CORS
         self.send_response(200, "ok")
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
     def do_POST(self):
-        # Read the body of the POST request
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        request_body = json.loads(post_data)
+        try:
+            # Read the body of the POST request
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            request_body = json.loads(post_data)
 
-        regions_to_process = request_body.get("regions", [])
-        threshold = request_body.get("threshold_ms", 0)
+            regions_to_process = request_body.get("regions", [])
+            threshold = request_body.get("threshold_ms", 0)
 
-        results = []
+            results = []
 
-        for region in regions_to_process:
-            region_data = [d for d in telemetry_data if d['region'] == region]
-            
-            if region_data:
-                latencies = [d['latency_ms'] for d in region_data]
-                uptimes = [d['uptime_pct'] for d in region_data]
+            for region in regions_to_process:
+                region_data = [d for d in telemetry_data if d['region'] == region]
                 
-                # Calculate metrics using built-in Python functions
-                avg_latency = round(sum(latencies) / len(latencies), 2)
-                p95_latency = round(calculate_percentile(latencies, 95), 2)
-                avg_uptime = round(sum(uptimes) / len(uptimes), 3)
-                breaches = sum(1 for lat in latencies if lat > threshold)
+                if region_data:
+                    latencies = [d['latency_ms'] for d in region_data]
+                    uptimes = [d['uptime_pct'] for d in region_data]
+                    
+                    avg_latency = round(sum(latencies) / len(latencies), 2)
+                    p95_latency = round(calculate_percentile(latencies, 95), 2)
+                    avg_uptime = round(sum(uptimes) / len(uptimes), 3)
+                    breaches = sum(1 for lat in latencies if lat > threshold)
 
-                results.append({
-                    "region": region,
-                    "avg_latency": avg_latency,
-                    "p95_latency": p95_latency,
-                    "avg_uptime": avg_uptime,
-                    "breaches": breaches,
-                })
-        
-        # Prepare and send the response
-        response_data = json.dumps({"regions": results})
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(response_data.encode('utf-8'))
-
+                    results.append({
+                        "region": region,
+                        "avg_latency": avg_latency,
+                        "p95_latency": p95_latency,
+                        "avg_uptime": avg_uptime,
+                        "breaches": breaches,
+                    })
+            
+            # Prepare and send the response
+            response_data = json.dumps({"regions": results})
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(response_data.encode('utf-8'))
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            error_message = json.dumps({"error": str(e)})
+            self.wfile.write(error_message.encode('utf-8'))
+    
     def do_GET(self):
         # A simple GET response to confirm the server is running
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(b'{"message": "API is running. Use a POST request."}')
