@@ -1,74 +1,69 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+import pandas as pd
 from typing import List
+import os
 
-from pydantic import BaseModel
+# Create the FastAPI application
+app = FastAPI()
 
-
-app = FastAPI(debug=True)
-
+# --- IMPORTANT: This is the CORS configuration ---
+# It allows requests from any origin, which is required by the quiz.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],    # Allows all origins
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]    # Expose all the headers to the browser in response
 )
 
+# --- Load the telemetry data from the JSON file ---
+# This uses a reliable method to find the file's path.
+try:
+    base_dir = os.path.dirname(__file__)
+    file_path = os.path.join(base_dir, "q-vercel-latency.json")
+    telemetry_df = pd.read_json(file_path)
+except Exception as e:
+    print(f"Error loading data file from {file_path}: {e}")
+    telemetry_df = pd.DataFrame()
 
-class CheckRequest(BaseModel):
-    regions: List[str]
-    threshold_ms: int
+@app.post("/")
+async def get_latency_stats(request: Request):
+    """
+    This is the main endpoint that accepts a POST request,
+    calculates statistics, and returns the result.
+    """
+    if telemetry_df.empty:
+        return {"error": f"Server could not load data file from path: {file_path}"}, 500
 
+    request_data = await request.json()
+    regions_to_process = request_data.get("regions", [])
+    threshold = request_data.get("threshold_ms", 0)
 
-# REQUEST:->         {"regions":["amer","emea"],"threshold_ms":152}
-# RESPONSE:->        {"regions":{"amer":{"avg_latency":176.27,"p95":220.86,"avg_uptime":97.98,"breaches":9},"emea":{"avg_latency":177.2,"p95":218.3,"avg_uptime":98.5,"breaches":8}}}
+    response_data = []
 
-@app.post("/check")
-def check(data: CheckRequest):
-    regions = data.regions
-    threshold_ms = data.threshold_ms
+    for region in regions_to_process:
+        region_df = telemetry_df[telemetry_df['region'] == region]
 
-    import json
-    import os
+        if not region_df.empty:
+            avg_latency = round(region_df['latency_ms'].mean(), 2)
+            p95_latency = round(region_df['latency_ms'].quantile(0.95), 2)
+            avg_uptime = round(region_df['uptime_pct'].mean(), 3)
+            breaches = int((region_df['latency_ms'] > threshold).sum())
 
-    file = "q-vercel-latency.json"
-    path = os.path.join(os.path.dirname(__file__), file)
-    with open(path, "r") as f:
-        telemetry = json.load(f)
+            response_data.append({
+                "region": region,
+                "avg_latency": avg_latency,
+                "p95_latency": p95_latency,
+                "avg_uptime": avg_uptime,
+                "breaches": breaches,
+            })
 
-    result = {}
+    return {"regions": response_data}
 
-    for region in regions:
-        latency_sum = 0
-        uptime_sum = 0
-        breaches = 0
-        count = 0
-
-        for entry in telemetry:
-            if entry["region"] == region:
-                latency_sum += entry["latency_ms"]
-                uptime_sum += entry["uptime_pct"]
-                count += 1
-                if entry["latency_ms"] > threshold_ms:
-                    breaches += 1
-
-        avg_latency = round(latency_sum / count, 2) if count else 0
-        avg_uptime = round(uptime_sum / count, 2) if count else 0
-        import numpy as np
-
-        region_latencies = [e["latency_ms"] for e in telemetry if e["region"] == region]
-        p95 = np.percentile(region_latencies, 95) if region_latencies else 0
-
-        result[region] = {
-            "avg_latency": round(avg_latency, 2),
-            "p95": round(p95, 2),
-            "avg_uptime": round(avg_uptime, 2),
-            "breaches": breaches,
-        }
-    return {"regions": result}
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.get("/")
+async def root():
+    """
+    A simple GET endpoint to confirm the server is running.
+    """
+    return {"message": "API is running. Use a POST request to get statistics."}
