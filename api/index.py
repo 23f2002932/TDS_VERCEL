@@ -14,6 +14,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]    # Expose all the headers to the browser in response
 )
 
 # Use a reliable method to find the data file's path
