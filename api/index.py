@@ -1,120 +1,64 @@
-import json
-from http.server import BaseHTTPRequestHandler
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List
+import pandas as pd
+import os
 
-# --- Helper function to calculate percentile without external libraries ---
-def calculate_percentile(data, percentile):
-    if not data:
-        return 0
-    size = len(data)
-    sorted_data = sorted(data)
-    index = (percentile / 100) * (size - 1)
+# --- Pydantic model for request validation ---
+class CheckRequest(BaseModel):
+    regions: List[str]
+    threshold_ms: int
 
-    if index.is_integer():
-        return sorted_data[int(index)]
-    else:
-        lower_index = int(index)
-        upper_index = lower_index + 1
-        fraction = index - lower_index
-        if upper_index < size:
-            return sorted_data[lower_index] + (sorted_data[upper_index] - sorted_data[lower_index]) * fraction
-        else:
-            return sorted_data[lower_index]
+# --- Create the FastAPI App and Enable CORS ---
+app = FastAPI()
 
-# --- The JSON data from your quiz, embedded directly in the code ---
-telemetry_data = [
-    {"region":"apac","service":"analytics","latency_ms":225.55,"uptime_pct":98.427,"timestamp":20250301},
-    {"region":"apac","service":"analytics","latency_ms":197.32,"uptime_pct":99.212,"timestamp":20250302},
-    {"region":"apac","service":"support","latency_ms":183.88,"uptime_pct":99.072,"timestamp":20250303},
-    {"region":"apac","service":"payments","latency_ms":183.52,"uptime_pct":98.291,"timestamp":20250304},
-    {"region":"apac","service":"catalog","latency_ms":164.73,"uptime_pct":98.234,"timestamp":20250305},
-    {"region":"apac","service":"payments","latency_ms":174.03,"uptime_pct":97.972,"timestamp":20250306},
-    {"region":"apac","service":"support","latency_ms":224.51,"uptime_pct":98.665,"timestamp":20250307},
-    {"region":"apac","service":"checkout","latency_ms":184.65,"uptime_pct":98.221,"timestamp":20250308},
-    {"region":"apac","service":"analytics","latency_ms":130.37,"uptime_pct":97.592,"timestamp":20250309},
-    {"region":"apac","service":"support","latency_ms":165.67,"uptime_pct":98.896,"timestamp":20250310},
-    {"region":"apac","service":"payments","latency_ms":188.97,"uptime_pct":97.718,"timestamp":20250311},
-    {"region":"apac","service":"payments","latency_ms":123.37,"uptime_pct":97.731,"timestamp":20250312},
-    {"region":"emea","service":"checkout","latency_ms":133.02,"uptime_pct":98.028,"timestamp":20250301},
-    {"region":"emea","service":"catalog","latency_ms":169.84,"uptime_pct":99.109,"timestamp":20250302},
-    {"region":"emea","service":"payments","latency_ms":154.18,"uptime_pct":97.394,"timestamp":20250303},
-    {"region":"emea","service":"checkout","latency_ms":195.82,"uptime_pct":98.972,"timestamp":20250304},
-    {"region":"emea","service":"support","latency_ms":144.93,"uptime_pct":97.49,"timestamp":20250305},
-    {"region":"emea","service":"analytics","latency_ms":160.15,"uptime_pct":97.653,"timestamp":20250306},
-    {"region":"emea","service":"payments","latency_ms":100.9,"uptime_pct":97.399,"timestamp":20250307},
-    {"region":"emea","service":"analytics","latency_ms":164.21,"uptime_pct":98.377,"timestamp":20250308},
-    {"region":"emea","service":"checkout","latency_ms":165.87,"uptime_pct":98.908,"timestamp":20250309},
-    {"region":"emea","service":"analytics","latency_ms":196.88,"uptime_pct":97.614,"timestamp":20250310},
-    {"region":"emea","service":"analytics","latency_ms":145.07,"uptime_pct":98.827,"timestamp":20250311},
-    {"region":"emea","service":"checkout","latency_ms":232.59,"uptime_pct":99.194,"timestamp":20250312},
-    {"region":"amer","service":"analytics","latency_ms":195.24,"uptime_pct":97.459,"timestamp":20250301},
-    {"region":"amer","service":"payments","latency_ms":176.28,"uptime_pct":98.3,"timestamp":20250302},
-    {"region":"amer","service":"payments","latency_ms":153.44,"uptime_pct":97.598,"timestamp":20250303},
-    {"region":"amer","service":"checkout","latency_ms":132.69,"uptime_pct":98.214,"timestamp":20250304},
-    {"region":"amer","service":"recommendations","latency_ms":194.49,"uptime_pct":97.514,"timestamp":20250305},
-    {"region":"amer","service":"recommendations","latency_ms":175.57,"uptime_pct":97.756,"timestamp":20250306},
-    {"region":"amer","service":"payments","latency_ms":107.35,"uptime_pct":98.311,"timestamp":20250307},
-    {"region":"amer","service":"support","latency_ms":104.89,"uptime_pct":98.197,"timestamp":20250308},
-    {"region":"amer","service":"analytics","latency_ms":224.83,"uptime_pct":98.185,"timestamp":20250309},
-    {"region":"amer","service":"catalog","latency_ms":173.78,"uptime_pct":97.919,"timestamp":20250310},
-    {"region":"amer","service":"catalog","latency_ms":136.74,"uptime_pct":99.219,"timestamp":20250311},
-    {"region":"amer","service":"recommendations","latency_ms":117.76,"uptime_pct":98.919,"timestamp":20250312}
-]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class handler(BaseHTTPRequestHandler):
-    def do_OPTIONS(self):
-        self.send_response(200, "ok")
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
+# --- Load data ONCE when the app starts, not on every request ---
+try:
+    base_dir = os.path.dirname(__file__)
+    file_path = os.path.join(base_dir, "q-vercel-latency.json")
+    telemetry_df = pd.read_json(file_path)
+except Exception as e:
+    print(f"Error loading data file: {e}")
+    telemetry_df = pd.DataFrame()
 
-    def do_POST(self):
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            request_body = json.loads(post_data)
+# --- The API Endpoint (now at the root "/") ---
+@app.post("/")
+async def get_latency_stats(data: CheckRequest):
+    if telemetry_df.empty:
+        return {"error": "Server is missing the telemetry data file."}, 500
 
-            regions_to_process = request_body.get("regions", [])
-            threshold = request_body.get("threshold_ms", 0)
+    results_list = []
 
-            results = []
+    # Process each region from the validated request data
+    for region in data.regions:
+        region_df = telemetry_df[telemetry_df['region'] == region]
 
-            for region in regions_to_process:
-                region_data = [d for d in telemetry_data if d['region'] == region]
+        if not region_df.empty:
+            # Using pandas is much cleaner and more efficient
+            avg_latency = round(region_df['latency_ms'].mean(), 2)
+            p95_latency = round(region_df['latency_ms'].quantile(0.95), 2)
+            avg_uptime = round(region_df['uptime_pct'].mean(), 3)
+            breaches = int((region_df['latency_ms'] > data.threshold_ms).sum())
 
-                if region_data:
-                    latencies = [d['latency_ms'] for d in region_data]
-                    uptimes = [d['uptime_pct'] for d in region_data]
+            # --- The response format must be a LIST of objects ---
+            results_list.append({
+                "region": region,
+                "avg_latency": avg_latency,
+                "p95_latency": p95_latency,
+                "avg_uptime": avg_uptime,
+                "breaches": breaches,
+            })
 
-                    avg_latency = round(sum(latencies) / len(latencies), 2)
-                    p95_latency = round(calculate_percentile(latencies, 95), 2)
-                    avg_uptime = round(sum(uptimes) / len(uptimes), 3)
-                    breaches = sum(1 for lat in latencies if lat > threshold)
+    return {"regions": results_list}
 
-                    results.append({
-                        "region": region,
-                        "avg_latency": avg_latency,
-                        "p95_latency": p95_latency,
-                        "avg_uptime": avg_uptime,
-                        "breaches": breaches,
-                    })
-
-            response_data = json.dumps({"regions": results})
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(response_data.encode('utf-8'))
-        except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            error_message = json.dumps({"error": str(e)})
-            self.wfile.write(error_message.encode('utf-8'))
-
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(b'{"message": "API is running. Use a POST request."}')
+@app.get("/")
+async def root():
+    return {"message": "API is running. Use a POST request to get statistics."}
