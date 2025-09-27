@@ -4,7 +4,7 @@ import urllib.parse
 
 # Load student data from the JSON file
 def load_data():
-    with open('q-vercel-latency.json', 'r') as file:
+    with open('q-vercel-python.json', 'r') as file:
         data = json.load(file)
     return data
 
