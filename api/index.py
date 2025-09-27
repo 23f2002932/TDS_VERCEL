@@ -1,55 +1,49 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List
 import pandas as pd
+from typing import List
 import os
 
-# --- Pydantic model for request validation ---
-class CheckRequest(BaseModel):
-    regions: List[str]
-    threshold_ms: int
-
-# --- Create the FastAPI App and Enable CORS ---
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- Load data ONCE when the app starts, not on every request ---
 try:
     base_dir = os.path.dirname(__file__)
     file_path = os.path.join(base_dir, "q-vercel-latency.json")
     telemetry_df = pd.read_json(file_path)
 except Exception as e:
-    print(f"Error loading data file: {e}")
+    print(f"Error loading data file from {file_path}: {e}")
     telemetry_df = pd.DataFrame()
 
-# --- The API Endpoint (now at the root "/") ---
-@app.post("/")
-async def get_latency_stats(data: CheckRequest):
+# CHANGED: The route is now "/post" to match your request
+@app.post("/post")
+async def get_latency_stats(request: Request):
     if telemetry_df.empty:
-        return {"error": "Server is missing the telemetry data file."}, 500
+        return {"error": f"Server could not load data file from path: {file_path}"}, 500
 
-    results_list = []
+    request_data = await request.json()
+    regions_to_process = request_data.get("regions", [])
+    threshold = request_data.get("threshold_ms", 0)
 
-    # Process each region from the validated request data
-    for region in data.regions:
+    response_data = []
+
+    for region in regions_to_process:
         region_df = telemetry_df[telemetry_df['region'] == region]
 
         if not region_df.empty:
-            # Using pandas is much cleaner and more efficient
             avg_latency = round(region_df['latency_ms'].mean(), 2)
             p95_latency = round(region_df['latency_ms'].quantile(0.95), 2)
             avg_uptime = round(region_df['uptime_pct'].mean(), 3)
-            breaches = int((region_df['latency_ms'] > data.threshold_ms).sum())
+            breaches = int((region_df['latency_ms'] > threshold).sum())
 
-            # --- The response format must be a LIST of objects ---
-            results_list.append({
+            response_data.append({
                 "region": region,
                 "avg_latency": avg_latency,
                 "p95_latency": p95_latency,
@@ -57,8 +51,8 @@ async def get_latency_stats(data: CheckRequest):
                 "breaches": breaches,
             })
 
-    return {"regions": results_list}
+    return {"regions": response_data}
 
 @app.get("/")
 async def root():
-    return {"message": "API is running. Use a POST request to get statistics."}
+    return {"message": "API is running. Send a POST request to the /post endpoint."}
