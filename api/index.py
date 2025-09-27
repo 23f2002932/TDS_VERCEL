@@ -4,8 +4,10 @@ import pandas as pd
 from typing import List
 import os
 
+# Create the FastAPI application
 app = FastAPI()
 
+# Enable CORS to allow POST requests from any origin
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,6 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Use a reliable method to find the data file's path
 try:
     base_dir = os.path.dirname(__file__)
     file_path = os.path.join(base_dir, "q-vercel-latency.json")
@@ -22,8 +25,8 @@ except Exception as e:
     print(f"Error loading data file from {file_path}: {e}")
     telemetry_df = pd.DataFrame()
 
-# CHANGED: The route is now "/post" to match your request
-@app.post("/post")
+# This is the main endpoint that accepts a POST request at the root URL ("/")
+@app.post("/")
 async def get_latency_stats(request: Request):
     if telemetry_df.empty:
         return {"error": f"Server could not load data file from path: {file_path}"}, 500
@@ -53,6 +56,7 @@ async def get_latency_stats(request: Request):
 
     return {"regions": response_data}
 
+# A simple GET endpoint at the root URL to confirm the server is running
 @app.get("/")
 async def root():
-    return {"message": "API is running. Send a POST request to the /post endpoint."}
+    return {"message": "API is running. Use a POST request to get statistics."}
