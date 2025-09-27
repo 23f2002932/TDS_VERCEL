@@ -1,69 +1,38 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
-from typing import List
-import os
+import json
+from http.server import BaseHTTPRequestHandler
+import urllib.parse
 
-# Create the FastAPI application
-app = FastAPI()
+# Load student data from the JSON file
+def load_data():
+    with open('q-vercel-python.json', 'r') as file:
+        data = json.load(file)
+    return data
 
-# --- IMPORTANT: This is the CORS configuration ---
-# It allows requests from any origin, which is required by the quiz.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Handler class to process incoming requests
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # Parse the query parameters
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
 
-# --- Load the telemetry data from the JSON file ---
-# This uses a reliable method to find the file's path.
-try:
-    base_dir = os.path.dirname(__file__)
-    file_path = os.path.join(base_dir, "q-vercel-latency.json")
-    telemetry_df = pd.read_json(file_path)
-except Exception as e:
-    print(f"Error loading data file from {file_path}: {e}")
-    telemetry_df = pd.DataFrame()
+        # Get 'name' parameters from the query string
+        names = query.get('name', [])
 
-@app.post("/")
-async def get_latency_stats(request: Request):
-    """
-    This is the main endpoint that accepts a POST request,
-    calculates statistics, and returns the result.
-    """
-    if telemetry_df.empty:
-        return {"error": f"Server could not load data file from path: {file_path}"}, 500
+        # Load data from the JSON file
+        data = load_data()
 
-    request_data = await request.json()
-    regions_to_process = request_data.get("regions", [])
-    threshold = request_data.get("threshold_ms", 0)
+        # Prepare the result dictionary
+        result = {"marks": []}
+        for name in names:
+            # Find the marks for each name
+            for entry in data:
+                if entry["name"] == name:
+                    result["marks"].append(entry["marks"])
 
-    response_data = []
+        # Send the response header
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')  # Enable CORS for any origin
+        self.end_headers()
 
-    for region in regions_to_process:
-        region_df = telemetry_df[telemetry_df['region'] == region]
-
-        if not region_df.empty:
-            avg_latency = round(region_df['latency_ms'].mean(), 2)
-            p95_latency = round(region_df['latency_ms'].quantile(0.95), 2)
-            avg_uptime = round(region_df['uptime_pct'].mean(), 3)
-            breaches = int((region_df['latency_ms'] > threshold).sum())
-
-            response_data.append({
-                "region": region,
-                "avg_latency": avg_latency,
-                "p95_latency": p95_latency,
-                "avg_uptime": avg_uptime,
-                "breaches": breaches,
-            })
-
-    return {"regions": response_data}
-
-@app.get("/")
-async def root():
-    """
-    A simple GET endpoint to confirm the server is running.
-    """
-    return {"message": "API is running. Use a POST request to get statistics."}
+        # Send the JSON response
+        self.wfile.write(json.dumps(result).encode('utf-8'))
