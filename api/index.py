@@ -8,7 +8,7 @@ def calculate_percentile(data, percentile):
     size = len(data)
     sorted_data = sorted(data)
     index = (percentile / 100) * (size - 1)
-    
+
     if index.is_integer():
         return sorted_data[int(index)]
     else:
@@ -20,7 +20,7 @@ def calculate_percentile(data, percentile):
         else:
             return sorted_data[lower_index]
 
-# --- The JSON data is embedded directly in the code ---
+# --- The JSON data from your quiz, embedded directly in the code ---
 telemetry_data = [
     {"region":"apac","service":"analytics","latency_ms":225.55,"uptime_pct":98.427,"timestamp":20250301},
     {"region":"apac","service":"analytics","latency_ms":197.32,"uptime_pct":99.212,"timestamp":20250302},
@@ -81,11 +81,11 @@ class handler(BaseHTTPRequestHandler):
 
             for region in regions_to_process:
                 region_data = [d for d in telemetry_data if d['region'] == region]
-                
+
                 if region_data:
                     latencies = [d['latency_ms'] for d in region_data]
                     uptimes = [d['uptime_pct'] for d in region_data]
-                    
+
                     avg_latency = round(sum(latencies) / len(latencies), 2)
                     p95_latency = round(calculate_percentile(latencies, 95), 2)
                     avg_uptime = round(sum(uptimes) / len(uptimes), 3)
@@ -98,7 +98,7 @@ class handler(BaseHTTPRequestHandler):
                         "avg_uptime": avg_uptime,
                         "breaches": breaches,
                     })
-            
+
             response_data = json.dumps({"regions": results})
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
@@ -111,7 +111,7 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             error_message = json.dumps({"error": str(e)})
             self.wfile.write(error_message.encode('utf-8'))
-    
+
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
